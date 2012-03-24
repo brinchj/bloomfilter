@@ -85,6 +85,8 @@ module Data.BloomFilter
 
     -- | The raw bit array used by the immutable 'MBloom' type.
     , bitArrayMB
+    -- | Reconstruction
+    , constructB
     ) where
 
 #include "MachDeps.h"
@@ -94,14 +96,14 @@ import Control.Monad.ST (ST, runST)
 import Control.DeepSeq (NFData(..))
 import Data.Array.Base (unsafeAt, unsafeRead, unsafeWrite)
 import Data.Array.ST (STUArray, thaw, unsafeFreeze)
-import Data.Array.Unboxed (UArray)
+import Data.Array.Unboxed (UArray, assocs)
 import Data.Bits ((.&.), (.|.))
 import Data.BloomFilter.Array (newArray)
 import Data.BloomFilter.Util (FastShift(..), (:*)(..), nextPowerOfTwo)
 import Data.Word (Word32)
 
 -- Make sure we're not performing any expensive arithmetic operations.
-import Prelude hiding ((/), (*), div, divMod, mod, rem)
+import Prelude hiding ((/), div, divMod, mod, rem)
 
 {-
 import Debug.Trace
@@ -266,7 +268,7 @@ elemMB elt mb = loop (hashesM mb elt)
 elemB :: a -> Bloom a -> Bool
 elemB elt ub = all test (hashesU ub elt)
   where test (off :* bit) = (bitArrayB ub `unsafeAt` off) .&. (1 `shiftL` bit) /= 0
-          
+
 modifyB :: (forall s. (MBloom s a -> ST s z))  -- ^ mutation function (result is discarded)
         -> Bloom a
         -> Bloom a
@@ -450,3 +452,19 @@ logPower2 k = go 0 k
 -- filter is rounded up to the nearest power of two.  This lets the
 -- implementation use bitwise operations internally, instead of much
 -- more expensive multiplication, division, and modulus operations.
+
+
+
+-- Reconstruction
+{-# INLINE constructB #-}
+constructB :: (a -> [Hash])
+           -> UArray Int Hash
+           -> Bloom a
+constructB hash array = B hash shift mask array
+  where
+    assc     = assocs array
+    numElems = length assc
+    numBytes = numElems * (2 ^ logBytesInHash)
+    trueBits = numElems `shiftL` logBitsInHash
+    shift = logPower2 trueBits
+    mask = trueBits - 1
